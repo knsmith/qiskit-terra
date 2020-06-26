@@ -19,7 +19,7 @@ import itertools
 import sys
 import warnings
 import multiprocessing as mp
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import numpy as np
 from qiskit.exceptions import QiskitError
 from qiskit.util import is_main_process
@@ -1624,6 +1624,100 @@ class QuantumCircuit:
 
         return bound_circuit
 
+    def find_idle_time_asap(self, backend, output_in_dt=True):
+        """
+        Return a dictionary from qubit to idle times. Uses ASAP
+        """
+
+        free_times = defaultdict(list)
+        curr_time = defaultdict(int)
+
+        if backend is None:
+            warnings.warn("Backend needed to produce timing information.")
+            return free_times
+        
+        basis_gates = backend.configuration().basis_gates
+        dt = 1
+        if output_in_dt:
+            dt = backend.configuration().dt
+        cals = backend.defaults().instruction_schedule_map
+
+        free_times = defaultdict(list)
+        curr_time = defaultdict(int)
+        for inst, qubits, clbits in self.data:
+            if inst.name not in basis_gates:
+                continue
+            qubit_indices = tuple(qubit.index for qubit in qubits)
+            start_time = max(curr_time[q] for q in qubit_indices)
+            for q in qubit_indices:
+                if start_time > curr_time[q]:
+                    free_times[q].append([curr_time[q], start_time])
+            duration = cals.get(inst.name, qubit_indices, *inst.params).duration
+            for q in qubit_indices:
+                new_time = start_time + duration
+                if output_in_dt:
+                    new_time = int(new_time)
+                curr_time[q] = new_time
+        end_time = max(curr_time.values())
+        for q, time in curr_time.items():
+            if end_time > time:
+                free_times[q].append([time, end_time])
+        return free_times
+
+    
+    def find_idle_time_alap(self, backend=None, output_in_dt=True):
+        """
+        Return a dictionary from qubit to idle times. Uses ALAP
+        """
+
+        free_times = defaultdict(list)
+        curr_time = defaultdict(int)
+
+        if backend is None:
+            warnings.warn("Backend needed to produce timing information.")
+            return free_times
+        
+        basis_gates = backend.configuration().basis_gates
+        dt = 1
+        if output_in_dt:
+            dt = backend.configuration().dt
+        cals = backend.defaults().instruction_schedule_map
+
+
+        for i in range(len(self.data)-1,-1,-1):
+            inst = self.data[i][0]
+            qubits = self.data[i][1]
+            clbits = self.data[i][1]
+
+            if inst.name not in basis_gates:
+                continue
+            qubit_indices = tuple(qubit.index for qubit in qubits)
+            start_time = max(curr_time[q] for q in qubit_indices)
+            for q in qubit_indices:
+                if start_time > curr_time[q]:
+                    free_times[q].append([curr_time[q], start_time])
+            duration = cals.get(inst.name, qubit_indices, *inst.params).duration
+            for q in qubit_indices:
+                new_time = start_time + duration
+                if output_in_dt:
+                    new_time = int(new_time)
+                curr_time[q] = new_time
+        end_time = max(curr_time.values())
+        for q, time in curr_time.items():
+            if end_time > time:
+                free_times[q].append([time, end_time])
+
+        for item in free_times:
+            for i in range(0,len(free_times[item])):
+                val0 = end_time - free_times[item][i][0]
+                val1 = end_time - free_times[item][i][1]
+
+                free_times[item][i][0] = val1
+                free_times[item][i][1] = val0
+
+        return free_times
+    
+    
     def _unroll_param_dict(self, value_dict):
         unrolled_value_dict = {}
         for (param, value) in value_dict.items():
@@ -2042,7 +2136,9 @@ class QuantumCircuit:
         """Apply :class:`~qiskit.circuit.library.CZGate`."""
         from .library.standard_gates.z import CZGate
         return self.append(CZGate(label=label, ctrl_state=ctrl_state),
-                           [control_qubit, target_qubit], [])
+                               [control_qubit, target_qubit], [])
+
+    
 
 
 def _circuit_from_qasm(qasm):

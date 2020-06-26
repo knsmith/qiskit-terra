@@ -24,7 +24,7 @@ directly from the graph.
 """
 import os
 import warnings
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import copy
 import itertools
 import networkx as nx
@@ -35,6 +35,7 @@ from qiskit.circuit.classicalregister import ClassicalRegister
 from qiskit.circuit.gate import Gate
 from qiskit.dagcircuit.exceptions import DAGCircuitError
 from qiskit.dagcircuit.dagnode import DAGNode
+
 
 
 # During retworkx transition, transition between 'nx' and 'rx' graph libraries
@@ -1435,3 +1436,37 @@ class DAGCircuit:
         """
         from qiskit.visualization.dag_visualization import dag_drawer
         return dag_drawer(dag=self, scale=scale, filename=filename, style=style)
+
+    def critical_path_timing(self, backend=None, output_in_dt=True):
+        """
+        Returns timing on critical path (longest in terms of gates) for a dag.
+        Must have a backend.
+        """
+        delay = 0
+        if backend is None:
+            warnings.warn("Backend needed to produce timing information.")
+            return delay
+
+
+        properties = backend.properties()
+        cals = backend.defaults().instruction_schedule_map
+        path = self.longest_path()
+        for item in path:
+            qubits = item.qargs
+            qubit_indices = tuple(qubit.index for qubit in qubits)
+            if item.type == 'op':
+                if item.name == 'barrier' or item.name == 'measure':
+                    continue
+                
+                else:
+                    if output_in_dt is True:
+                        gate_len = cals.get(item.name, qubit_indices, *item.op.params).duration
+                        delay = delay + gate_len
+                
+                    if output_in_dt is False:
+                        gate_len = properties.gate_length(item.name ,qubit_indices)
+                        delay = delay + gate_len
+            
+        
+        return delay
+
