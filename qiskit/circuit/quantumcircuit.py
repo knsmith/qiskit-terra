@@ -1629,8 +1629,6 @@ class QuantumCircuit:
         Return a dictionary from qubit to idle times. Uses ASAP
         """
 
-        free_times = defaultdict(list)
-        curr_time = defaultdict(int)
 
         if backend is None:
             warnings.warn("Backend needed to produce timing information.")
@@ -1640,19 +1638,31 @@ class QuantumCircuit:
         dt = 1
         if output_in_dt:
             dt = backend.configuration().dt
-        cals = backend.defaults().instruction_schedule_map
+            cals = backend.defaults().instruction_schedule_map #time in dt
+        else:
+            gate_times = backend.properties().gate_length #time in seconds
 
         free_times = defaultdict(list)
         curr_time = defaultdict(int)
+        visited_qubits = []
+
+
         for inst, qubits, clbits in self.data:
             if inst.name not in basis_gates:
                 continue
             qubit_indices = tuple(qubit.index for qubit in qubits)
+            for item in qubit_indices:
+                if item not in visited_qubits:
+                    visited_qubits.append(item)
+                
             start_time = max(curr_time[q] for q in qubit_indices)
             for q in qubit_indices:
                 if start_time > curr_time[q]:
                     free_times[q].append([curr_time[q], start_time])
-            duration = cals.get(inst.name, qubit_indices, *inst.params).duration
+            if output_in_dt:
+                duration = cals.get(inst.name, qubit_indices, *inst.params).duration
+            else:
+                duration = gate_times(inst.name,qubit_indices)
             for q in qubit_indices:
                 new_time = start_time + duration
                 if output_in_dt:
@@ -1662,6 +1672,11 @@ class QuantumCircuit:
         for q, time in curr_time.items():
             if end_time > time:
                 free_times[q].append([time, end_time])
+        
+        for item in visited_qubits:
+            if item not in free_times:
+                free_times[item] = []
+        
         return free_times
 
     
@@ -1669,9 +1684,6 @@ class QuantumCircuit:
         """
         Return a dictionary from qubit to idle times. Uses ALAP
         """
-
-        free_times = defaultdict(list)
-        curr_time = defaultdict(int)
 
         if backend is None:
             warnings.warn("Backend needed to produce timing information.")
@@ -1681,7 +1693,13 @@ class QuantumCircuit:
         dt = 1
         if output_in_dt:
             dt = backend.configuration().dt
-        cals = backend.defaults().instruction_schedule_map
+            cals = backend.defaults().instruction_schedule_map #time in dt
+        else:
+            gate_times = backend.properties().gate_length #time in seconds
+
+        free_times = defaultdict(list)
+        curr_time = defaultdict(int)
+        visited_qubits = []
 
 
         for i in range(len(self.data)-1,-1,-1):
@@ -1692,11 +1710,18 @@ class QuantumCircuit:
             if inst.name not in basis_gates:
                 continue
             qubit_indices = tuple(qubit.index for qubit in qubits)
+            for item in qubit_indices:
+                if item not in visited_qubits:
+                    visited_qubits.append(item)
+
             start_time = max(curr_time[q] for q in qubit_indices)
             for q in qubit_indices:
                 if start_time > curr_time[q]:
                     free_times[q].append([curr_time[q], start_time])
-            duration = cals.get(inst.name, qubit_indices, *inst.params).duration
+            if output_in_dt:
+                duration = cals.get(inst.name, qubit_indices, *inst.params).duration
+            else:
+                duration = gate_times(inst.name,qubit_indices)
             for q in qubit_indices:
                 new_time = start_time + duration
                 if output_in_dt:
@@ -1715,6 +1740,10 @@ class QuantumCircuit:
                 free_times[item][i][0] = val1
                 free_times[item][i][1] = val0
 
+        for item in visited_qubits:
+            if item not in free_times:
+                free_times[item] = []
+        
         return free_times
     
     
